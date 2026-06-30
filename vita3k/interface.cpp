@@ -20,6 +20,7 @@
 #include "module/load_module.h"
 
 #include <app/functions.h>
+#include <config/functions.h>
 #include <config/state.h>
 #include <ctrl/functions.h>
 #include <ctrl/state.h>
@@ -514,6 +515,18 @@ static void toggle_texture_replacement(EmuEnvState &emuenv) {
     emuenv.renderer->get_texture_cache()->set_replacement_state(emuenv.cfg.current_config.import_textures, emuenv.cfg.current_config.export_textures, emuenv.cfg.current_config.export_as_png);
 }
 
+// Toggle the FPS Hack setting (Settings -> GPU -> FPS Hack) via a controller
+// chord (L1+R1 on PlayStation, LB+RB on Xbox). Keeps the global config, the
+// per-app current_config and the runtime mirror in sync and persists the
+// change to disk so it is reflected when the Settings dialog is next opened.
+static void toggle_fps_hack(EmuEnvState &emuenv) {
+    emuenv.cfg.fps_hack = !emuenv.cfg.fps_hack;
+    emuenv.cfg.current_config.fps_hack = emuenv.cfg.fps_hack;
+    emuenv.display.fps_hack = emuenv.cfg.fps_hack;
+    config::serialize_config(emuenv.cfg, emuenv.cfg.config_path);
+    LOG_INFO("FPS Hack {}", emuenv.cfg.fps_hack ? "enabled" : "disabled");
+}
+
 static void take_screenshot(EmuEnvState &emuenv) {
     if (emuenv.cfg.screenshot_format == None)
         return;
@@ -739,6 +752,25 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
             if (ImGui::GetIO().WantTextInput || emuenv.drop_inputs)
                 continue;
 
+            // L1+R1 / LB+RB chord: toggle the FPS Hack setting (Settings -> GPU).
+            // Track held state and fire once per simultaneous press via the
+            // `fps_hack_chord_armed` latch. Placed here (after the drop_inputs
+            // continue) so the chord is only active outside settings/controls
+            // dialogs, matching the existing keyboard hotkey guard behaviour.
+            if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
+                emuenv.display.fps_hack_chord_l1_held = true;
+                if (emuenv.display.fps_hack_chord_r1_held && emuenv.display.fps_hack_chord_armed) {
+                    toggle_fps_hack(emuenv);
+                    emuenv.display.fps_hack_chord_armed = false;
+                }
+            } else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+                emuenv.display.fps_hack_chord_r1_held = true;
+                if (emuenv.display.fps_hack_chord_l1_held && emuenv.display.fps_hack_chord_armed) {
+                    toggle_fps_hack(emuenv);
+                    emuenv.display.fps_hack_chord_armed = false;
+                }
+            }
+
             for (const auto &binding : get_controller_bindings_ext(emuenv)) {
                 if (event.gbutton.button == binding.controller) {
                     if (last_buttons.contains(binding.button)) {
@@ -750,6 +782,17 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
                     break;
                 }
             }
+            break;
+
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            // Clear shoulder held-state and re-arm the FPS Hack chord latch
+            // once both L1/LB and R1/RB have been released.
+            if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)
+                emuenv.display.fps_hack_chord_l1_held = false;
+            else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)
+                emuenv.display.fps_hack_chord_r1_held = false;
+            if (!emuenv.display.fps_hack_chord_l1_held && !emuenv.display.fps_hack_chord_r1_held)
+                emuenv.display.fps_hack_chord_armed = true;
             break;
 
         case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:

@@ -75,6 +75,15 @@ struct DisplayState {
     // or run twice as fast (if they only rely on these function calls for their timings)
     bool fps_hack = false;
 
+    // L1+R1 / LB+RB chord tracking for the FPS Hack toggle hotkey.
+    // `*_held` reflect the current pressed state of each shoulder; `chord_armed`
+    // is a latch that guarantees exactly one toggle per simultaneous press even
+    // when the two button-down events arrive back-to-back, and is re-enabled
+    // only once both shoulders have been released.
+    bool fps_hack_chord_l1_held = false;
+    bool fps_hack_chord_r1_held = false;
+    bool fps_hack_chord_armed = true;
+
     // should contain the list of sync objects / swapchain images (in the order they appear in the cycle)
     std::vector<PredictedDisplayFrame> predicted_frames;
     // position in the predicted_frame cycle (the -1 is needed)
